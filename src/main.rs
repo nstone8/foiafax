@@ -15,6 +15,15 @@ struct FormLetter {
     response: String,
 }
 
+#[get("/favicon.ico")]
+fn stream_icon() -> Response<'static>{
+    let favicon=BufReader::new(File::open("static/kal.ico").expect("Failed to open favicon"));
+    let mut resp:Response = Response::new();
+    resp.set_header(ContentType::GIF);
+    resp.set_sized_body(favicon);
+    resp
+}
+
 #[post("/", data="<form>")]
 fn post_form(form:Result<Form<FormLetter>, Option<String>>) -> String{
     let this_form_post=form.expect("SCREEEEE");
@@ -32,5 +41,5 @@ fn get_form() -> Response<'static> {
 }
 
 fn main() {
-    rocket::ignite().mount("/", routes![get_form,post_form]).launch();
+    rocket::ignite().mount("/", routes![get_form,post_form,stream_icon]).launch();
 }
