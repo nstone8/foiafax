@@ -13,7 +13,6 @@ use std::io::BufReader;
 use std::fs::File;
 use std::vec::Vec;
 use std::io::Read;
-use std::iter::Map;
 
 use regex::Regex;
 use regex::CaptureMatches;
@@ -56,15 +55,24 @@ fn main() {
 struct FormField{
     height: i32,
     prompt: [u8;1000],
-}impl FormField{
+}impl Clone for FormField{
+    fn clone(&self) -> FormField{
+        FormField{height:self.height,prompt:self.prompt}
+    }
+}impl Copy for FormField{}
+impl FormField{
     fn blank() -> FormField{
         FormField{height:0, prompt: [0;1000]}
     }
-    fn set_prompt(&self,prompt: &[u8]){
+    fn set_prompt(&mut self,prompt: &[u8]){
         if prompt.len() > self.prompt.len(){
             panic!("prompt is too long");
         }else{
-            self.prompt[1:self.prompt.len()-1]=prompt[1:self.prompt.len()-1]
+            let mut my_prompt=[0;1000];
+            for j in 0..prompt.len(){
+                my_prompt[j]=prompt[j];
+            }
+            self.prompt=my_prompt;
         }
     }
 }
@@ -85,24 +93,37 @@ struct FormLetter{
     fn get_title(&self)->String{
         String::from_utf8(self.title.to_vec()).expect("Not a string!!!!")
     }
-    fn set_title(&self,title: &[u8]){
+    fn set_title(&mut self,title: &[u8]){
         if title.len() > self.title.len(){
             panic!("title is too long");
         }else{
-            self.title[1:self.title.len()-1]=title[1:self.title.len()-1]
+            let mut mytitle=[0;100];
+            for j in 0..title.len(){
+                mytitle[j]=title[j];
+            }
+            self.title=mytitle
         }
     }
     fn get_width(&self)->i32{
         self.width
     }
     fn get_const_sec(&self) -> Vec<String>{
-        map_fn=|x:[u8;10000]|{
-            String::from_utf8(x.to_vec()).expect("Not a string!");
-        }
-        let str_map=self.const_sec.iter().map(map_fn);
-        str_map.collect()
+        let map_fn=|x:&[u8;10000]| -> String{
+            String::from_utf8(x.to_vec()).expect("Not a string!")
+        };
+        self.const_sec.iter().map(map_fn).collect()
     }
-
+    fn set_const_sec(&mut self,const_sec: &[u8]){
+        if const_sec.len() > 10000{
+            panic!("constant section is too long");
+        }else{
+            let mut my_const_sec=[0;10000];
+            for j in 0..const_sec.len(){
+                my_const_sec[j]=const_sec[j];
+            }
+            self.const_sec.push(my_const_sec);
+        }
+    }
     pub fn format(&mut self)-> &str{
         println!("title={}",self.get_title());
         println!("width={}",self.get_width());
@@ -121,15 +142,26 @@ fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
         Err(_) => return Err("Failed to read letter buffer"),
         Ok(_) => {
             //Assume first line of a file is a FORM block
-            let reg=Regex::new(r"[[.*(.*)]]").expect("Error compiling regex");
-            let tag_reg=Regex::new(r".*=.*(|||)?").expect("Error compiling regex");
+            let reg=Regex::new(r"\[\[.*\(.*\)\]\]").expect("Error compiling regex");
+//            let tag_reg=Regex::new(r".*=.*(\|\|\|)?").expect("Error compiling regex");
+            let block_reg=Regex::new(r"\[\[.+\(").expect("Error compiling regex");
+            let pair_reg=Regex::new(r"\(.*\)").expect("Error compiling regex");
             let tag_blocks=reg.captures_iter(&letter);
             for tag in tag_blocks{
-                match tag[1].trim(){ //this should be the block name
-                    "FORM" => {for keyPair in tag_reg.captures(&letter){
-                        match keyPair[1].trim(){
-                            "width" => f.width=keyPair[2].trim().parse::<i32>().expect("not an int!"),
-                            "title" => f.set_title(keyPair[2].trim().as_bytes()),
+                println!("Found block:");
+                println!("{}",&tag[0]);
+                let mut block_name=block_reg.captures(&tag[0]).unwrap().get(0).unwrap().as_str();
+                block_name=&block_name[2..(block_name.len()-1)].trim();
+                println!("block name: {}",block_name);
+                let arg_str=pair_reg.captures(&tag[0]).unwrap().get(0).unwrap().as_str();
+                let key_pair_vec=arg_str[1..(arg_str.len()-1)].split("|||");
+                match block_name{ //this is the whole block
+                    "FORM" => {for key_pair in key_pair_vec{
+                        println!("key pair: {}",key_pair);
+                        let mut this_key_pair=key_pair.split("=");
+                        match this_key_pair.next().unwrap().trim(){
+                            "width" => f.width=this_key_pair.next().unwrap().trim().parse::<i32>().expect("not an int!"),
+                            "title" => f.set_title(this_key_pair.next().unwrap().trim().as_bytes()),
                             _ => panic!("bad tag"),
                         }
                         
@@ -137,10 +169,12 @@ fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
                     },
                     "ENTRY" => {
                         let mut ent=FormField::blank();
-                        for keyPair in tag_reg.captures(&letter){
-                            match keyPair[1].trim(){
-                                "prompt" => ent.set_prompt(keyPair[2].trim().as_bytes()),
-                                "height" => ent.height=keyPair[2].trim().parse::<i32>().expect("height not an int!"),
+                        for key_pair in key_pair_vec{
+                            println!("key pair: {}",key_pair);
+                            let mut this_key_pair=key_pair.split("=");
+                            match this_key_pair.next().unwrap().trim(){
+                                "prompt" => ent.set_prompt(this_key_pair.next().unwrap().trim().as_bytes()),
+                                "height" => ent.height=this_key_pair.next().unwrap().trim().parse::<i32>().expect("height not an int!"),
                                 _ => panic!("bad tag"),
                             }
                             
@@ -150,10 +184,10 @@ fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
                 }
             }
             //Add extraction of constant form letter sections here
-            let reg_consts=Regex::new(r"]].*[[").expect("Error compiling regex");
+            let reg_consts=Regex::new(r"\]\].*\[\[").expect("Error compiling regex");
             let consts=reg_consts.captures_iter(&letter);
             for constant in consts{
-                f.const_sec.push(constant[1].trim().as_bytes())
+                f.set_const_sec(constant[0].trim().as_bytes())
             }
         },
     }
