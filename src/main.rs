@@ -5,14 +5,17 @@
 
 extern crate rocket;
 extern crate regex;
+
 use rocket::request::Form;
 use rocket::Response;
 use rocket::http::ContentType;
+use rocket::State;
 
 use std::io::BufReader;
 use std::fs::File;
 use std::vec::Vec;
 use std::io::Read;
+use std::io::Cursor;
 
 use regex::Regex;
 use regex::CaptureMatches;
@@ -24,7 +27,7 @@ struct FormResponse {
 
 #[get("/favicon.ico")]
 fn stream_icon() -> Response<'static>{
-    let favicon=BufReader::new(File::open("static/kal.ico").expect("Failed to open favicon"));
+    let favicon=BufReader::new(File::open("static/favicon.ico").expect("Failed to open favicon"));
     let mut resp:Response = Response::new();
     resp.set_header(ContentType::GIF);
     resp.set_sized_body(favicon);
@@ -39,18 +42,16 @@ fn post_form(form:Result<Form<FormResponse>, Option<String>>) -> String{
     format!("Response was: {}",this_form.response).to_string()
 }
 #[get("/")]
-fn get_form() -> Response<'static> {
-    let index=BufReader::new(File::open("static/index.html").expect("Failed to open index HTML document"));
+fn get_form(f: State<FormLetter>) -> Response<'static> {
     let mut resp:Response = Response::new();
     resp.set_header(ContentType::HTML);
-    resp.set_sized_body(index);
+    resp.set_sized_body(Cursor::new(f.format_form()));
     resp
 }
 
 fn main() {
     let mut my_form=build_form(File::open("forms/kal").expect("where are you kal, boy?")).expect("Form build error");
-    my_form.format();
-    rocket::ignite().mount("/", routes![get_form,post_form,stream_icon]).launch();
+    rocket::ignite().manage(my_form).mount("/", routes![get_form,post_form,stream_icon]).launch();
 }
 struct FormField{
     height: i32,
@@ -64,6 +65,11 @@ impl FormField{
     fn blank() -> FormField{
         FormField{height:0, prompt: [0;1000]}
     }
+    fn get_prompt(&self)->String{
+        let output=String::from_utf8(self.prompt.to_vec()).expect("Not a string!!!!");
+        println!("got prompt: {}",output);
+        output
+    }
     fn set_prompt(&mut self,prompt: &[u8]){
         if prompt.len() > self.prompt.len(){
             panic!("prompt is too long");
@@ -72,6 +78,7 @@ impl FormField{
             for j in 0..prompt.len(){
                 my_prompt[j]=prompt[j];
             }
+            println!("Set prompt to: {}", String::from_utf8(my_prompt.to_vec()).expect("hiiii"));
             self.prompt=my_prompt;
         }
     }
@@ -81,10 +88,12 @@ struct FormLetter{
     title: [u8;100],
     width: i32,
     entries: [FormField;100],
+    num_entries: usize,
     const_sec: Vec<[u8;10000]>,
 } impl FormLetter {
     fn new() -> FormLetter{
         FormLetter{entries: [FormField::blank();100],
+                   num_entries:0,
                    const_sec: Vec::new(),
                    title: [0;100],
                    width: 0,
@@ -124,12 +133,22 @@ struct FormLetter{
             self.const_sec.push(my_const_sec);
         }
     }
-    pub fn format(&mut self)-> &str{
+    pub fn format_form(&self)-> String{
         println!("title={}",self.get_title());
-        println!("width={}",self.get_width());
-        "Formatted"
-    }
-    
+        println!("width={}",self.get_width());        
+        let entries=self.entries;
+        let mut out=String::new()+"<h1>"+&self.get_title()+"</h1>\n";
+        let mut index=0;
+        for k in 0..self.num_entries{
+            let entry=self.entries[k];
+            out=String::new()+&out+"<p>"+&entry.get_prompt()+"</p>\n";
+            out=String::new()+&out+"<textarea name=\"response"+&index.to_string()+"\" rows=\""+&entry.height.to_string()+"\""+"cols=\""+&self.width.to_string()+"\"></textarea>\n";
+            index=index+1;
+        }
+        println!("output HTML:");
+        println!("{}",out);
+        out
+    }    
 }
 
 fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
@@ -178,7 +197,10 @@ fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
                                 _ => panic!("bad tag"),
                             }
                             
-                        }},
+                        }
+                        f.entries[f.num_entries]=ent;
+                        f.num_entries=f.num_entries+1;
+                    },
                     _ => panic!("bad tag"),
                     
                 }
@@ -193,4 +215,3 @@ fn build_form<T:Read>(mut letter_file:T) -> Result<FormLetter,&'static str>{
     }
     Ok(f)    
 }
-
